@@ -2,10 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
-
-	yaml "gopkg.in/yaml.v2"
 
 	"github.com/sarpt/openapi-yaml-combine/pkg/openapi"
 )
@@ -13,16 +10,21 @@ import (
 const filepath string = "../../examples/test.yaml"
 
 func main() {
-	data, err := ioutil.ReadFile(filepath)
+	rootDocument := openapi.NewDocument(filepath)
+
+	err := rootDocument.ParseFile()
 	if err != nil {
-		log.Fatalf("Error while reading source file: %v", err)
+		log.Fatalf("Error while parsing the root document: %v", err)
 	}
 
-	apiContent := openapi.OpenApi{}
+	rootDocument.FindReferences()
 
-	err = yaml.Unmarshal([]byte(data), &apiContent)
+	err = rootDocument.ResolveReferences()
 	if err != nil {
-		log.Fatalf("Error while parsing YAML: %v", err)
+		log.Fatalf("Error while resolving references in root document: %v", err)
 	}
-	fmt.Printf("%+v\n", apiContent)
+
+	fmt.Printf("%+v\n", rootDocument.Root)
+
+	fmt.Printf("%+v\n", rootDocument.Root.Paths["/companies"].Get.Responses["200"])
 }

@@ -1,9 +1,5 @@
 package openapi
 
-type Reference struct {
-	Ref string `yaml:"$ref"`
-}
-
 type Info struct {
 	Title       string `yaml:"title"`
 	Description string `yaml:"description"`
@@ -11,7 +7,7 @@ type Info struct {
 }
 
 type JSON struct {
-	Schema `yaml:"schema"`
+	Schema Schema `yaml:"schema"`
 }
 
 type Content struct {
@@ -21,17 +17,18 @@ type Content struct {
 type Response struct {
 	Description string `yaml:"description"`
 	Content     `yaml:"content"`
+	Ref         string `yaml:"$ref"`
 }
 
 type Get struct {
-	Summary     string              `yaml:"summary"`
-	Description string              `yaml:"description"`
-	Responses   map[string]Response `yaml:"responses"`
+	Summary     string               `yaml:"summary"`
+	Description string               `yaml:"description"`
+	Responses   map[string]*Response `yaml:"responses"`
 }
 
 type Path struct {
-	Get Get `yaml:"get"`
-	Reference
+	Get Get    `yaml:"get"`
+	Ref string `yaml:"$ref"`
 }
 
 type Server struct {
@@ -40,10 +37,11 @@ type Server struct {
 }
 
 type OpenApi struct {
-	Version string          `yaml:"openapi"`
-	Info    Info            `yaml:"info"`
-	Paths   map[string]Path `yaml:"paths"`
-	Servers []Server        `yaml:"servers"`
+	Version    string           `yaml:"openapi"`
+	Info       Info             `yaml:"info"`
+	Paths      map[string]*Path `yaml:"paths"`
+	Servers    []Server         `yaml:"servers"`
+	Components Components       `yaml:"components"`
 }
 
 type Property struct {
@@ -55,5 +53,11 @@ type Schema struct {
 }
 
 type Components struct {
-	Schemas map[string]Schema `yaml:"schemas"`
+	Schemas   map[string]Schema    `yaml:"schemas"`
+	Responses map[string]*Response `yaml:"responses"`
+}
+
+type References struct {
+	PathReferences     map[string]*Path
+	ResponseReferences map[string]*Response
 }
