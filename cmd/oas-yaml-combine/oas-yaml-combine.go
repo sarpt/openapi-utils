@@ -17,14 +17,10 @@ func main() {
 		log.Fatalf("Error while parsing the root document: %v", err)
 	}
 
-	rootDocument.FindReferences()
-
 	err = rootDocument.ResolveReferences()
 	if err != nil {
 		log.Fatalf("Error while resolving references in root document: %v", err)
 	}
-
-	fmt.Printf("%+v\n", rootDocument.Root)
 
 	fmt.Printf("%+v\n", rootDocument.Root.Paths["/companies"].Get.Responses["200"])
 }

@@ -36,7 +36,7 @@ type Server struct {
 	Description string `yaml:"description"`
 }
 
-type OpenApi struct {
+type OpenAPI struct {
 	Version    string           `yaml:"openapi"`
 	Info       Info             `yaml:"info"`
 	Paths      map[string]*Path `yaml:"paths"`

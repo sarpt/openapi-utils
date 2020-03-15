@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"fmt"
 	"io/ioutil"
 	"path"
 	"strings"
@@ -8,85 +9,104 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+// Document represents single OpenAPI source file and it's content
+// A Document can be dependent on other Documents by using OpenAPI references
 type Document struct {
-	FilePath string
-	References
-	Root                OpenApi
-	ReferencedDocuments map[string]Document
+	FilePath            string
+	Root                *OpenAPI
+	ReferencedDocuments map[string]*Document
 }
 
-func (doc Document) FindReferences() {
-	for path, pathSchema := range doc.Root.Paths {
+// ResolveReferences takes a document and tries to find and resolve all references
+// After execution all elements that had not empty Ref properties have their contents replaced with referenced content
+func (doc Document) ResolveReferences() error {
+	for _, pathSchema := range doc.Root.Paths {
 		if pathSchema.Ref != "" {
-			doc.PathReferences[pathSchema.Ref] = doc.Root.Paths[path]
+			doc.replaceReference(pathSchema.Ref, pathSetter)
 			continue
 		}
 
-		for response, responseSchema := range pathSchema.Get.Responses {
+		for _, responseSchema := range pathSchema.Get.Responses {
 			if responseSchema.Ref != "" {
-				doc.ResponseReferences[responseSchema.Ref] = pathSchema.Get.Responses[response]
+				doc.replaceReference(responseSchema.Ref, responseSetter)
 				continue
 			}
 		}
 	}
+
+	return nil
 }
 
-func (doc *Document) ParseFile() error {
+func (doc Document) replaceReference(refPath string, setter func(elementName string, targetDocument Document, referenceDocument Document)) error {
+	referencedDocument, err := doc.getReferencedDocument(refPath)
+	if err != nil {
+		return fmt.Errorf("Could not get reference document: %w", err)
+	}
+
+	elementName := path.Base(refPath)
+	setter(elementName, doc, *referencedDocument)
+	return nil
+}
+
+// ParseFile attempts to read & parse content of file Document points to
+func (doc Document) ParseFile() error {
 	data, err := ioutil.ReadFile(doc.FilePath)
 	if err != nil {
 		return err
 	}
 
-	err = yaml.Unmarshal([]byte(data), &doc.Root)
+	err = yaml.Unmarshal([]byte(data), doc.Root)
 	return err
 }
 
-func (doc *Document) ResolveReferences() error {
-	for refPath, response := range doc.ResponseReferences {
-		if isLocalReference(refPath) {
-			continue
-		}
+func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
+	var referencedDocument *Document
+	var err error
 
-		var referencedDocument Document
-		pathToDocument := strings.Split(refPath, "#")[0]
-
-		if document, ok := doc.ReferencedDocuments[pathToDocument]; ok {
-			referencedDocument = document
-		} else {
-			referencedDocument = NewDocument(pathToDocument)
-
-			err := referencedDocument.ParseFile()
-			if err != nil {
-				return err
-			}
-
-			referencedDocument.FindReferences()
-
-			err = referencedDocument.ResolveReferences()
-			if err != nil {
-				return err
-			}
-		}
-
-		responseComponentName := path.Base(refPath)
-		*response = *referencedDocument.Root.Components.Responses[responseComponentName]
+	if isLocalReference(refPath) {
+		return &doc, nil
 	}
 
-	return nil
+	pathToDocument := getPathToRemoteDocument(refPath)
+
+	if document, ok := doc.ReferencedDocuments[pathToDocument]; ok {
+		referencedDocument = document
+	} else {
+		referencedDocument, err = ParseDocument(pathToDocument)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return referencedDocument, nil
 }
 
 func isLocalReference(path string) bool {
 	return strings.IndexRune(path, '#') == 0
 }
 
+func getPathToRemoteDocument(path string) string {
+	return strings.Split(path, "#")[0]
+}
+
+// ParseDocument takes path to the file that should be parsed and have it's references resolved
+func ParseDocument(path string) (*Document, error) {
+	referencedDocument := NewDocument(path)
+
+	err := referencedDocument.ParseFile()
+	if err != nil {
+		return nil, err
+	}
+
+	err = referencedDocument.ResolveReferences()
+	return &referencedDocument, err
+}
+
+// NewDocument constructs new Document instance
 func NewDocument(filePath string) Document {
 	return Document{
-		FilePath: filePath,
-		References: References{
-			PathReferences:     make(map[string]*Path),
-			ResponseReferences: make(map[string]*Response),
-		},
-		Root:                OpenApi{},
-		ReferencedDocuments: make(map[string]Document),
+		FilePath:            filePath,
+		Root:                &OpenAPI{},
+		ReferencedDocuments: make(map[string]*Document),
 	}
 }
