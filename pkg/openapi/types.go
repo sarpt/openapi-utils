@@ -23,21 +23,28 @@ type Info struct {
 	License        *License `yaml:"license"`
 }
 
-// JSON ...
-type JSON struct {
-	Schema *Schema `yaml:"schema"`
+// Encoding ...
+type Encoding struct {
+	AllowReserved bool               `yaml:"allowReserved"`
+	ContentType   string             `yaml:"contentType"`
+	Explode       bool               `yaml:"explode"`
+	Headers       map[string]*Header `yaml:"header"`
+	Style         string             `yaml:"string"`
 }
 
-// Content ...
-type Content struct {
-	JSON *JSON `yaml:"application/json"`
+// MediaType ...
+type MediaType struct {
+	Ref      string               `yaml:"$ref"`
+	Examples map[string]*Example  `yaml:"examples"`
+	Encoding map[string]*Encoding `yaml:"encoding"`
+	Schema   *Schema              `yaml:"schema"`
 }
 
 // Response ...
 type Response struct {
-	Ref         string   `yaml:"$ref"`
-	Description string   `yaml:"description"`
-	Content     *Content `yaml:"content"`
+	Ref         string                `yaml:"$ref"`
+	Content     map[string]*MediaType `yaml:"content"`
+	Description string                `yaml:"description"`
 }
 
 // Operation ...

@@ -141,17 +141,11 @@ func getFieldFromParent(parent interface{}, fieldName string) (reflect.Value, er
 	case reflect.Ptr:
 		return parentVal.Elem().FieldByName(fieldName), nil
 	case reflect.Map:
-		mapIter := parentVal.MapRange()
-		for mapIter.Next() {
-			if mapIter.Key().String() == fieldName {
-				return mapIter.Value(), nil
-			}
-		}
+		_, val, err := itemFromMapByName(parentVal, fieldName)
+		return val, err
 	default:
 		return reflect.Value{}, fmt.Errorf("provided parent is neither pointer to struct nor a map")
 	}
-
-	return reflect.Value{}, fmt.Errorf("provided name %s could not be found on parent", fieldName)
 }
 
 func (doc Document) assignReference(refPath string, parent interface{}, fieldName string) error {
@@ -183,12 +177,12 @@ func (doc Document) getItemByPath(refPath string) (interface{}, error) {
 
 			parentValue = childItem
 		case reflect.Map:
-			mapIter := parentValue.MapRange()
-			for mapIter.Next() {
-				if mapIter.Key().String() == itemName {
-					parentValue = mapIter.Value()
-				}
+			_, val, err := itemFromMapByName(parentValue, itemName)
+			if err != nil {
+				return nil, fmt.Errorf("could not resolve path %s due to error: %w", refPath, err)
 			}
+
+			parentValue = val
 		}
 	}
 
@@ -215,12 +209,12 @@ func replaceReference(parent interface{}, fieldName string, ref interface{}) err
 	switch parentVal.Kind() {
 	case reflect.Ptr:
 	case reflect.Map:
-		mapIter := parentVal.MapRange()
-		for mapIter.Next() {
-			if mapIter.Key().String() == fieldName {
-				parentVal.SetMapIndex(mapIter.Key(), refVal)
-			}
+		key, _, err := itemFromMapByName(parentVal, fieldName)
+		if err != nil {
+			return err
 		}
+
+		parentVal.SetMapIndex(key, refVal)
 	}
 	return nil
 }
@@ -246,4 +240,15 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 	}
 
 	return referencedDocument, nil
+}
+
+func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect.Value, error) {
+	mapIter := mapVal.MapRange()
+	for mapIter.Next() {
+		if mapIter.Key().String() == key {
+			return mapIter.Key(), mapIter.Value(), nil
+		}
+	}
+
+	return reflect.Value{}, reflect.Value{}, fmt.Errorf("could not find %s key in map", key)
 }
