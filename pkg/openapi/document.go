@@ -8,6 +8,15 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+const (
+	// RootItem is an OpenAPI Root
+	RootItem = "Root"
+	// Ref is a reference field
+	Ref = "Ref"
+	// YamlTag is a tag key which is used to parse YAML into internal representation
+	YamlTag = "yaml"
+)
+
 // Document represents single OpenAPI source file and it's content
 // A Document can be dependent on other Documents by using OpenAPI references
 type Document struct {
@@ -52,11 +61,10 @@ func (doc Document) ParseFile() error {
 // ResolveReferences takes a document and tries to find and resolve all references
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content
 func (doc Document) ResolveReferences() error {
-	return doc.parseItem(&doc, "Root")
+	return doc.parseField(&doc, RootItem)
 }
 
-func (doc Document) parseItem(parent interface{}, fieldName string) error {
-	var refPath string
+func (doc Document) parseField(parent interface{}, fieldName string) error {
 	item, err := getFieldFromParent(parent, fieldName)
 	if err != nil {
 		return err
@@ -66,7 +74,23 @@ func (doc Document) parseItem(parent interface{}, fieldName string) error {
 		return fmt.Errorf("%s is neither a pointer nor a map", item.Type().Name())
 	}
 
-	childrenItemsToParse := []string{}
+	refPath, childrenItemsToParse, err := parseItem(item)
+
+	if refPath != "" {
+		return doc.assignReference(refPath, parent, fieldName)
+	}
+
+	for _, childItem := range childrenItemsToParse {
+		err := doc.parseField(item.Interface(), childItem)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parseItem(item reflect.Value) (string, []string, error) {
+	var childrenToParse []string
 
 	switch item.Kind() {
 	case reflect.Ptr:
@@ -81,14 +105,11 @@ func (doc Document) parseItem(parent interface{}, fieldName string) error {
 
 			switch childItem.Kind() {
 			case reflect.String:
-				if itemType.Field(i).Name == "Ref" {
-					refPath = childItem.String()
+				if itemType.Field(i).Name == Ref {
+					return childItem.String(), []string{}, nil
 				}
-			case reflect.Array, reflect.Slice:
-			case reflect.Struct, reflect.Ptr:
-				childrenItemsToParse = append(childrenItemsToParse, itemType.Field(i).Name)
-			case reflect.Map:
-				childrenItemsToParse = append(childrenItemsToParse, itemType.Field(i).Name)
+			case reflect.Struct, reflect.Ptr, reflect.Map:
+				childrenToParse = append(childrenToParse, itemType.Field(i).Name)
 			}
 		}
 	case reflect.Map:
@@ -102,29 +123,16 @@ func (doc Document) parseItem(parent interface{}, fieldName string) error {
 
 			switch childItem.Kind() {
 			case reflect.String:
-				if mapIter.Key().String() == "Ref" {
-					refPath = childItem.String()
+				if mapIter.Key().String() == Ref {
+					return childItem.String(), []string{}, nil
 				}
-			case reflect.Array, reflect.Slice:
-			case reflect.Struct, reflect.Ptr:
-				childrenItemsToParse = append(childrenItemsToParse, mapIter.Key().String())
-			case reflect.Map:
-				childrenItemsToParse = append(childrenItemsToParse, mapIter.Key().String())
+			case reflect.Struct, reflect.Ptr, reflect.Map:
+				childrenToParse = append(childrenToParse, mapIter.Key().String())
 			}
 		}
 	}
 
-	if refPath != "" {
-		return doc.assignReference(refPath, parent, fieldName)
-	}
-
-	for _, childItem := range childrenItemsToParse {
-		err := doc.parseItem(item.Interface(), childItem)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return "", childrenToParse, nil
 }
 
 func getFieldFromParent(parent interface{}, fieldName string) (reflect.Value, error) {
@@ -191,7 +199,7 @@ func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) 
 	structItemType := structItem.Type()
 	for i := 0; i < structItemType.NumField(); i++ {
 		childItem := structItemType.Field(i)
-		yamlTag := childItem.Tag.Get("yaml")
+		yamlTag := childItem.Tag.Get(YamlTag)
 		if yamlTag == tag {
 			return structItem.Field(i), nil
 		}
