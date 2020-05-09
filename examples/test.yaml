@@ -8,6 +8,10 @@ servers:
     description: Optional server description, e.g. Main (production) server
   - url: http://staging-api.example.com
     description: Optional server description, e.g. Internal staging server for testing
+security:
+  - petstore_auth:
+    - write:pets
+    - read:pets
 paths:
   /users:
     get:
@@ -15,14 +19,14 @@ paths:
       description: Optional extended description in CommonMark or HTML.
       responses:
         '200':    # status code
-          $ref: '#/responses/UsersResponse'
+          $ref: '#/components/responses/UsersResponse'
   /companies:
     get:
       summary: Returns a list of companies.
       description: Optional extended description in CommonMark or HTML.
       responses:
         '200':    # status code
-          $ref: '../../examples/test_common.yaml#/components/CompaniesResponse'
+          $ref: '../../examples/test_common.yaml#/components/responses/CompaniesResponse'
 components:
   responses:
     UsersResponse:
