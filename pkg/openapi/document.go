@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"reflect"
+	"sort"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -31,6 +32,12 @@ type OASObject struct {
 	parent interface{}
 	name   string
 	idx    int
+}
+
+// Reference contains information about OpenAPI object that contains reference and path of reference
+type Reference struct {
+	object OASObject
+	path   string
 }
 
 // NewDocument constructs new Document instance
@@ -88,24 +95,47 @@ func (doc Document) ResolveReferences() error {
 		parent: &doc,
 		name:   RootItem,
 	}
-	return doc.parseOASObject(object)
-}
 
-func (doc Document) parseOASObject(object OASObject) error {
-	item, err := getFieldFromParent(object)
+	refs, err := doc.parseOASObject(object)
 	if err != nil {
 		return err
+	}
+
+	sort.Slice(refs, func(i, j int) bool {
+		return sortReferences(refs[i], refs[j])
+	})
+
+	for _, ref := range refs {
+		err := doc.assignReference(ref)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (doc Document) parseOASObject(object OASObject) ([]Reference, error) {
+	var allRefs []Reference
+
+	item, err := getFieldFromParent(object)
+	if err != nil {
+		return allRefs, err
 	}
 
 	switch item.Kind() {
 	case reflect.Ptr:
 		ref, fields, err := parsePtrItem(item)
 		if err != nil {
-			return err
+			return allRefs, err
 		}
 
 		if ref != "" {
-			return doc.assignReference(ref, object)
+			reference := Reference{
+				object: object,
+				path:   ref,
+			}
+			allRefs = append(allRefs, reference)
 		}
 
 		for _, field := range fields {
@@ -113,22 +143,25 @@ func (doc Document) parseOASObject(object OASObject) error {
 				parent: item.Interface(),
 				name:   field,
 			}
-			err := doc.parseOASObject(obj)
+			objRefs, err := doc.parseOASObject(obj)
 			if err != nil {
-				return err
+				return allRefs, err
 			}
+
+			allRefs = append(allRefs, objRefs...)
 		}
 	case reflect.Map:
 		refs, keys, err := parseMapItem(item)
 		if err != nil {
-			return err
+			return allRefs, err
 		}
 
 		for _, ref := range refs {
-			err := doc.assignReference(ref, object)
-			if err != nil {
-				return err
+			reference := Reference{
+				object: object,
+				path:   ref,
 			}
+			allRefs = append(allRefs, reference)
 		}
 
 		for _, key := range keys {
@@ -136,22 +169,24 @@ func (doc Document) parseOASObject(object OASObject) error {
 				parent: item.Interface(),
 				name:   key,
 			}
-			err := doc.parseOASObject(obj)
+			newRefs, err := doc.parseOASObject(obj)
 			if err != nil {
-				return err
+				return allRefs, err
 			}
+			allRefs = append(allRefs, newRefs...)
 		}
 	case reflect.Slice:
 		refs, indexes, err := parseSliceItem(item)
 		if err != nil {
-			return err
+			return allRefs, err
 		}
 
 		for _, ref := range refs {
-			err := doc.assignReference(ref, object)
-			if err != nil {
-				return err
+			reference := Reference{
+				object: object,
+				path:   ref,
 			}
+			allRefs = append(allRefs, reference)
 		}
 
 		for _, idx := range indexes {
@@ -159,16 +194,17 @@ func (doc Document) parseOASObject(object OASObject) error {
 				parent: item.Interface(),
 				idx:    idx,
 			}
-			err := doc.parseOASObject(obj)
+			newRefs, err := doc.parseOASObject(obj)
 			if err != nil {
-				return err
+				return allRefs, err
 			}
+			allRefs = append(allRefs, newRefs...)
 		}
 	default:
-		return fmt.Errorf("could not parse field %s due to incorrect type", object.name)
+		return allRefs, fmt.Errorf("could not parse field %s due to incorrect type", object.name)
 	}
 
-	return nil
+	return allRefs, nil
 }
 
 func parsePtrItem(item reflect.Value) (string, []string, error) {
@@ -260,18 +296,18 @@ func getFieldFromParent(object OASObject) (reflect.Value, error) {
 	}
 }
 
-func (doc Document) assignReference(refPath string, object OASObject) error {
-	referencedDocument, err := doc.getReferencedDocument(refPath)
+func (doc Document) assignReference(ref Reference) error {
+	referencedDocument, err := doc.getReferencedDocument(ref.path)
 	if err != nil {
 		return fmt.Errorf("could not get reference document: %w", err)
 	}
 
-	refItem, err := referencedDocument.getItemByPath(refPath)
+	refItem, err := referencedDocument.getItemByPath(ref.path)
 	if err != nil {
 		return err
 	}
 
-	return replaceReference(object, refItem)
+	return replaceReference(ref.object, refItem)
 }
 
 func (doc Document) getItemByPath(refPath string) (interface{}, error) {
@@ -367,4 +403,15 @@ func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect
 	}
 
 	return reflect.Value{}, reflect.Value{}, fmt.Errorf("could not find %s key in map", key)
+}
+
+func sortReferences(refI, refJ Reference) bool {
+	isILocal := isLocalReference(refI.path)
+	isJLocal := isLocalReference(refJ.path)
+
+	if !isILocal && isJLocal {
+		return true
+	}
+
+	return false
 }
