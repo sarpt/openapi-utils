@@ -14,18 +14,20 @@ security:
     - read:pets
 paths:
   /users:
-    get:
-      summary: Returns a list of users.
+    post:
+      summary: Adds user.
       description: Optional extended description in CommonMark or HTML.
+      requestBody:
+        $ref: "../../examples/test_common.yaml#/components/requestBodies/UsersRequest"
       responses:
-        '200':    # status code
+        '200':
           $ref: '#/components/responses/UsersResponse'
   /companies:
     get:
       summary: Returns a list of companies.
       description: Optional extended description in CommonMark or HTML.
       responses:
-        '200':    # status code
+        '200':
           $ref: '../../examples/test_common.yaml#/components/responses/CompaniesResponse'
         '403':
           $ref: '../../examples/test_common.yaml#/components/responses/CompaniesErrorResponse'
@@ -34,7 +36,7 @@ paths:
       summary: Returns a list of shops.
       description: Optional extended description in CommonMark or HTML.
       responses:
-        '200':    # status code
+        '200':
           $ref: '#/components/responses/ShopsResponse'
 components:
   responses:

@@ -191,7 +191,10 @@ type Example struct {
 
 // RequestBody ...
 type RequestBody struct {
-	Ref string `yaml:"$ref"`
+	Ref         string                `yaml:"$ref"`
+	Description string                `yaml:"description"`
+	Content     map[string]*MediaType `yaml:"content"`
+	Required    bool                  `yaml:"required"`
 }
 
 // Header ...

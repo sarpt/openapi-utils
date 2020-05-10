@@ -306,6 +306,8 @@ func replaceReference(parent interface{}, fieldName string, ref interface{}) err
 
 	switch parentVal.Kind() {
 	case reflect.Ptr:
+		field := parentVal.Elem().FieldByName(fieldName)
+		field.Set(refVal)
 	case reflect.Map:
 		key, _, err := itemFromMapByName(parentVal, fieldName)
 		if err != nil {
