@@ -117,7 +117,7 @@ type OpenAPI struct {
 	Paths        map[string]*PathItem   `yaml:"paths"`
 	Servers      []*Server              `yaml:"servers"`
 	Components   *Components            `yaml:"components"`
-	Security     []*SecurityRequirement `yaml:"security"`
+	Security     []SecurityRequirement  `yaml:"security"`
 	Tags         []*Tag                 `yaml:"tags"`
 	ExternalDocs *ExternalDocumentation `yaml:"externalDocs"`
 }
@@ -161,6 +161,10 @@ type Schema struct {
 	Required         []string               `yaml:"required"`
 	Enum             []string               `yaml:"enum"`
 	Items            *Schema                `yaml:"items"`
+	AllOf            []*Schema              `yaml:"allOf"`
+	OneOf            []*Schema              `yaml:"oneOf"`
+	AnyOf            []*Schema              `yaml:"anyOf"`
+	Not              []*Schema              `yaml:"not"`
 }
 
 // Parameter ...

@@ -9,6 +9,12 @@ components:
             type: array
             items: 
               type: string
+    CompaniesErrorResponse:
+      description: An error response when trying to resolve companies
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ExtendedErrorModel'
     ShopsResponse:
       description: A JSON array of shops
       content:
@@ -22,3 +28,29 @@ components:
             type: array
             items:
               type: string
+  schemas:
+    Address:
+      type: string
+    ErrorModel:
+      type: object
+      required:
+      - message
+      - code
+      properties:
+        message:
+          type: string
+        code:
+          type: integer
+          minimum: 100
+          maximum: 600
+    ExtendedErrorModel:
+      allOf:
+      - $ref: '#/components/schemas/ErrorModel'
+      - type: object
+        required:
+        - rootCause
+        properties:
+          rootCause:
+            type: string
+          address:
+            $ref: '#/components/schemas/Address'

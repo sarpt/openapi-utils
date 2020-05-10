@@ -27,6 +27,8 @@ paths:
       responses:
         '200':    # status code
           $ref: '../../examples/test_common.yaml#/components/responses/CompaniesResponse'
+        '403':
+          $ref: '../../examples/test_common.yaml#/components/responses/CompaniesErrorResponse'
   /shops:
     get:
       summary: Returns a list of shops.

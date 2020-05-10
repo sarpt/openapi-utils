@@ -25,6 +25,13 @@ type Document struct {
 	ReferencedDocuments map[string]*Document
 }
 
+// OASObject respresent the object of the OpenAPI schema
+type OASObject struct {
+	parent interface{}
+	name   string
+	idx    int
+}
+
 // NewDocument constructs new Document instance
 func NewDocument(filePath string) Document {
 	return Document{
@@ -61,97 +68,186 @@ func (doc Document) ParseFile() error {
 // ResolveReferences takes a document and tries to find and resolve all references
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content
 func (doc Document) ResolveReferences() error {
-	return doc.parseField(&doc, RootItem)
+	object := OASObject{
+		parent: &doc,
+		name:   RootItem,
+	}
+	return doc.parseOASObject(object)
 }
 
-func (doc Document) parseField(parent interface{}, fieldName string) error {
-	item, err := getFieldFromParent(parent, fieldName)
+func (doc Document) parseOASObject(object OASObject) error {
+	item, err := getFieldFromParent(object)
 	if err != nil {
 		return err
 	}
 
-	if !(item.Kind() == reflect.Ptr || item.Kind() == reflect.Map) {
-		return fmt.Errorf("%s is neither a pointer nor a map", item.Type().Name())
-	}
-
-	refPath, childrenItemsToParse, err := parseItem(item)
-
-	if refPath != "" {
-		return doc.assignReference(refPath, parent, fieldName)
-	}
-
-	for _, childItem := range childrenItemsToParse {
-		err := doc.parseField(item.Interface(), childItem)
+	switch item.Kind() {
+	case reflect.Ptr:
+		ref, fields, err := parsePtrItem(item)
 		if err != nil {
 			return err
 		}
+
+		if ref != "" {
+			return doc.assignReference(ref, object.parent, object.name)
+		}
+
+		for _, field := range fields {
+			obj := OASObject{
+				parent: item.Interface(),
+				name:   field,
+			}
+			err := doc.parseOASObject(obj)
+			if err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		refs, keys, err := parseMapItem(item)
+		if err != nil {
+			return err
+		}
+
+		for _, ref := range refs {
+			err := doc.assignReference(ref, object.parent, object.name)
+			if err != nil {
+				return err
+			}
+		}
+
+		for _, key := range keys {
+			obj := OASObject{
+				parent: item.Interface(),
+				name:   key,
+			}
+			err := doc.parseOASObject(obj)
+			if err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		refs, indexes, err := parseSliceItem(item)
+		if err != nil {
+			return err
+		}
+
+		for _, ref := range refs {
+			err := doc.assignReference(ref, object.parent, object.name)
+			if err != nil {
+				return err
+			}
+		}
+
+		for _, idx := range indexes {
+			obj := OASObject{
+				parent: item.Interface(),
+				idx:    idx,
+			}
+			err := doc.parseOASObject(obj)
+			if err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("could not parse field %s due to incorrect type", object.name)
 	}
+
 	return nil
 }
 
-func parseItem(item reflect.Value) (string, []string, error) {
-	var childrenToParse []string
+func parsePtrItem(item reflect.Value) (string, []string, error) {
+	var fieldsToParse []string
 
-	switch item.Kind() {
-	case reflect.Ptr:
-		itemElem := item.Elem()
-		itemType := itemElem.Type()
-		for i := 0; i < itemElem.NumField(); i++ {
-			childItem := itemElem.Field(i)
+	itemElem := item.Elem()
+	itemType := itemElem.Type()
+	for i := 0; i < itemElem.NumField(); i++ {
+		childItem := itemElem.Field(i)
 
-			if childItem.IsZero() {
-				continue
-			}
-
-			switch childItem.Kind() {
-			case reflect.String:
-				if itemType.Field(i).Name == Ref {
-					return childItem.String(), []string{}, nil
-				}
-			case reflect.Struct, reflect.Ptr, reflect.Map:
-				childrenToParse = append(childrenToParse, itemType.Field(i).Name)
-			}
+		if childItem.IsZero() {
+			continue
 		}
-	case reflect.Map:
-		mapIter := item.MapRange()
-		for mapIter.Next() {
-			childItem := mapIter.Value()
 
-			if childItem.IsZero() {
-				continue
+		switch childItem.Kind() {
+		case reflect.String:
+			if itemType.Field(i).Name == Ref {
+				return childItem.String(), fieldsToParse, nil
 			}
-
-			switch childItem.Kind() {
-			case reflect.String:
-				if mapIter.Key().String() == Ref {
-					return childItem.String(), []string{}, nil
-				}
-			case reflect.Struct, reflect.Ptr, reflect.Map:
-				childrenToParse = append(childrenToParse, mapIter.Key().String())
-			}
+		case reflect.Struct, reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
+			fieldsToParse = append(fieldsToParse, itemType.Field(i).Name)
 		}
 	}
 
-	return "", childrenToParse, nil
+	return "", fieldsToParse, nil
 }
 
-func getFieldFromParent(parent interface{}, fieldName string) (reflect.Value, error) {
-	parentVal := reflect.ValueOf(parent)
+func parseMapItem(item reflect.Value) ([]string, []string, error) {
+	var keysToParse []string
+	var refs []string
+
+	mapIter := item.MapRange()
+	for mapIter.Next() {
+		childItem := mapIter.Value()
+
+		if childItem.IsZero() {
+			continue
+		}
+
+		switch childItem.Kind() {
+		case reflect.String:
+			if mapIter.Key().String() == Ref {
+				refs = append(refs, childItem.String())
+			}
+		case reflect.Struct, reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
+			keysToParse = append(keysToParse, mapIter.Key().String())
+		}
+	}
+
+	return refs, keysToParse, nil
+}
+
+func parseSliceItem(item reflect.Value) ([]string, []int, error) {
+	var refs []string
+	var indexesToParse []int
+
+	for i := 0; i < item.Len(); i++ {
+		childItem := item.Index(i)
+
+		if childItem.IsZero() {
+			continue
+		}
+
+		switch childItem.Kind() {
+		case reflect.String:
+			if childItem.String() == Ref {
+				refs = append(refs, childItem.String())
+			}
+		case reflect.Struct, reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
+			indexesToParse = append(indexesToParse, i)
+		}
+	}
+
+	return refs, indexesToParse, nil
+}
+
+func getFieldFromParent(object OASObject) (reflect.Value, error) {
+	parentVal := reflect.ValueOf(object.parent)
 	switch parentVal.Kind() {
 	case reflect.Ptr:
-		return parentVal.Elem().FieldByName(fieldName), nil
+		return parentVal.Elem().FieldByName(object.name), nil
 	case reflect.Map:
-		_, val, err := itemFromMapByName(parentVal, fieldName)
+		_, val, err := itemFromMapByName(parentVal, object.name)
 		return val, err
+	case reflect.Slice:
+		return parentVal.Index(object.idx), nil
 	default:
-		return reflect.Value{}, fmt.Errorf("provided parent is neither pointer to struct nor a map")
+		return reflect.Value{}, fmt.Errorf("provided parent for %s field is not a correct type", object.name)
 	}
 }
 
 func (doc Document) assignReference(refPath string, parent interface{}, fieldName string) error {
 	referencedDocument, err := doc.getReferencedDocument(refPath)
 	if err != nil {
-		return fmt.Errorf("Could not get reference document: %w", err)
+		return fmt.Errorf("could not get reference document: %w", err)
 	}
 
 	refItem, err := referencedDocument.getItemByPath(refPath)
@@ -183,6 +279,8 @@ func (doc Document) getItemByPath(refPath string) (interface{}, error) {
 			}
 
 			parentValue = val
+		default:
+			return nil, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
 		}
 	}
 
