@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/sarpt/openapi-yaml-combine/pkg/openapi"
+	"github.com/sarpt/openapi-utils/pkg/openapi"
 )
 
 const filepath string = "../../examples/test.yaml"

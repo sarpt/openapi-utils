@@ -1,4 +1,4 @@
-module github.com/sarpt/openapi-yaml-combine
+module github.com/sarpt/openapi-utils
 
 go 1.13
 
