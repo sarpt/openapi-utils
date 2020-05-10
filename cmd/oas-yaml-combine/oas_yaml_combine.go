@@ -3,16 +3,24 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/sarpt/openapi-yaml-combine/pkg/openapi"
 )
 
 const filepath string = "../../examples/test.yaml"
+const outfile string = "out.yaml"
 
 func main() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("Error while trying to open user home directory")
+	}
+
+	outPath := fmt.Sprintf("%s/%s", homeDir, outfile)
 	rootDocument := openapi.NewDocument(filepath)
 
-	err := rootDocument.ParseFile()
+	err = rootDocument.ParseFile()
 	if err != nil {
 		log.Fatalf("Error while parsing the root document: %v", err)
 	}
@@ -22,9 +30,10 @@ func main() {
 		log.Fatalf("Error while resolving references in root document: %v", err)
 	}
 
-	fmt.Printf("Root: %+v\n", rootDocument.Root)
-	fmt.Printf("Security: %+v\n", rootDocument.Root.Security)
-	fmt.Printf("Companies: %+v\n", rootDocument.Root.Paths["/companies"].Get.Responses["200"])
-	fmt.Printf("Companies requestBody: %+v\n", rootDocument.Root.Paths["/users"].Post.RequestBody)
-	fmt.Printf("Users: %+v\n", rootDocument.Root.Paths["/users"].Post.Responses["200"])
+	err = rootDocument.WriteFile(outPath)
+	if err != nil {
+		log.Fatalf("Error while writing output to path %s: %v", outPath, err)
+	}
+
+	log.Printf("Wrote output YAML file to %s", outPath)
 }

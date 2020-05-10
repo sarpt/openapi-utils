@@ -3,6 +3,7 @@ package openapi
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"reflect"
 
 	yaml "gopkg.in/yaml.v2"
@@ -65,6 +66,21 @@ func (doc Document) ParseFile() error {
 	return err
 }
 
+// WriteFile writes content of a document to a YAML file pointed by path
+func (doc Document) WriteFile(path string) error {
+	yaml, err := doc.YAML()
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(path, yaml, os.FileMode(0777))
+}
+
+// YAML converts contents of a document to YAML
+func (doc Document) YAML() ([]byte, error) {
+	return yaml.Marshal(doc.Root)
+}
+
 // ResolveReferences takes a document and tries to find and resolve all references
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content
 func (doc Document) ResolveReferences() error {
@@ -89,7 +105,7 @@ func (doc Document) parseOASObject(object OASObject) error {
 		}
 
 		if ref != "" {
-			return doc.assignReference(ref, object.parent, object.name)
+			return doc.assignReference(ref, object)
 		}
 
 		for _, field := range fields {
@@ -109,7 +125,7 @@ func (doc Document) parseOASObject(object OASObject) error {
 		}
 
 		for _, ref := range refs {
-			err := doc.assignReference(ref, object.parent, object.name)
+			err := doc.assignReference(ref, object)
 			if err != nil {
 				return err
 			}
@@ -132,7 +148,7 @@ func (doc Document) parseOASObject(object OASObject) error {
 		}
 
 		for _, ref := range refs {
-			err := doc.assignReference(ref, object.parent, object.name)
+			err := doc.assignReference(ref, object)
 			if err != nil {
 				return err
 			}
@@ -244,7 +260,7 @@ func getFieldFromParent(object OASObject) (reflect.Value, error) {
 	}
 }
 
-func (doc Document) assignReference(refPath string, parent interface{}, fieldName string) error {
+func (doc Document) assignReference(refPath string, object OASObject) error {
 	referencedDocument, err := doc.getReferencedDocument(refPath)
 	if err != nil {
 		return fmt.Errorf("could not get reference document: %w", err)
@@ -255,7 +271,7 @@ func (doc Document) assignReference(refPath string, parent interface{}, fieldNam
 		return err
 	}
 
-	return replaceReference(parent, fieldName, refItem)
+	return replaceReference(object, refItem)
 }
 
 func (doc Document) getItemByPath(refPath string) (interface{}, error) {
@@ -300,16 +316,16 @@ func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) 
 	return reflect.Value{}, fmt.Errorf("the field with tag %s could not be found in type %s", tag, structItemType.Name())
 }
 
-func replaceReference(parent interface{}, fieldName string, ref interface{}) error {
-	parentVal := reflect.ValueOf(parent)
+func replaceReference(object OASObject, ref interface{}) error {
+	parentVal := reflect.ValueOf(object.parent)
 	refVal := reflect.ValueOf(ref)
 
 	switch parentVal.Kind() {
 	case reflect.Ptr:
-		field := parentVal.Elem().FieldByName(fieldName)
+		field := parentVal.Elem().FieldByName(object.name)
 		field.Set(refVal)
 	case reflect.Map:
-		key, _, err := itemFromMapByName(parentVal, fieldName)
+		key, _, err := itemFromMapByName(parentVal, object.name)
 		if err != nil {
 			return err
 		}
