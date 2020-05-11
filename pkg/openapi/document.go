@@ -357,6 +357,8 @@ func replaceReference(object OASObject, ref interface{}) error {
 	refVal := reflect.ValueOf(ref)
 
 	switch parentVal.Kind() {
+	case reflect.Slice:
+		parentVal.Index(object.idx).Set(refVal)
 	case reflect.Ptr:
 		field := parentVal.Elem().FieldByName(object.name)
 		field.Set(refVal)
@@ -403,15 +405,4 @@ func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect
 	}
 
 	return reflect.Value{}, reflect.Value{}, fmt.Errorf("could not find %s key in map", key)
-}
-
-func sortReferences(refI, refJ Reference) bool {
-	isILocal := isLocalReference(refI.path)
-	isJLocal := isLocalReference(refJ.path)
-
-	if !isILocal && isJLocal {
-		return true
-	}
-
-	return false
 }

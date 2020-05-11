@@ -22,3 +22,14 @@ func referencePathToItems(path string) []string {
 	componentReference := getPathToReference(path)
 	return strings.Split(componentReference, "/")[1:]
 }
+
+func sortReferences(refI, refJ Reference) bool {
+	isILocal := isLocalReference(refI.path)
+	isJLocal := isLocalReference(refJ.path)
+
+	if !isILocal && isJLocal {
+		return true
+	}
+
+	return false
+}
