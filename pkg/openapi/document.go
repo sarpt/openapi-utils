@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -17,6 +18,8 @@ const (
 	Ref = "Ref"
 	// YamlTag is a tag key which is used to parse YAML into internal representation
 	YamlTag = "yaml"
+	// YamlTagSeparator is a symbol which separates YAML key in tag from flags
+	YamlTagSeparator = ","
 )
 
 // Document represents single OpenAPI source file and it's content
@@ -320,7 +323,7 @@ func (doc Document) getItemByPath(refPath string) (interface{}, error) {
 			parentElem := parentValue.Elem()
 			childItem, err := getFieldByTag(itemName, parentElem)
 			if err != nil {
-				return nil, fmt.Errorf("could not find item %s in path %s", itemName, refPath)
+				return nil, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
 			}
 
 			parentValue = childItem
@@ -342,9 +345,9 @@ func (doc Document) getItemByPath(refPath string) (interface{}, error) {
 func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) {
 	structItemType := structItem.Type()
 	for i := 0; i < structItemType.NumField(); i++ {
-		childItem := structItemType.Field(i)
-		yamlTag := childItem.Tag.Get(YamlTag)
-		if yamlTag == tag {
+		childField := structItemType.Field(i)
+		yamlKey := getYamlKeyFromField(childField)
+		if yamlKey == tag {
 			return structItem.Field(i), nil
 		}
 	}
@@ -405,4 +408,10 @@ func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect
 	}
 
 	return reflect.Value{}, reflect.Value{}, fmt.Errorf("could not find %s key in map", key)
+}
+
+func getYamlKeyFromField(field reflect.StructField) string {
+	yamlTag := field.Tag.Get(YamlTag)
+
+	return strings.Split(yamlTag, YamlTagSeparator)[0]
 }
