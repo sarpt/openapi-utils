@@ -30,16 +30,16 @@ type Document struct {
 	ReferencedDocuments map[string]*Document
 }
 
-// OASObject respresent the object of the OpenAPI schema
-type OASObject struct {
+// oasObject respresent the object of the OpenAPI schema
+type oasObject struct {
 	parent interface{}
 	name   string
 	idx    int
 }
 
-// Reference contains information about OpenAPI object that contains reference and path of reference
-type Reference struct {
-	object OASObject
+// reference contains information about OpenAPI object that contains reference and path of reference
+type reference struct {
+	object oasObject
 	path   string
 }
 
@@ -94,7 +94,7 @@ func (doc Document) YAML() ([]byte, error) {
 // ResolveReferences takes a document and tries to find and resolve all references
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content
 func (doc Document) ResolveReferences() error {
-	object := OASObject{
+	object := oasObject{
 		parent: &doc,
 		name:   RootItem,
 	}
@@ -118,31 +118,31 @@ func (doc Document) ResolveReferences() error {
 	return nil
 }
 
-func (doc Document) parseOASObject(object OASObject) ([]Reference, error) {
-	var allRefs []Reference
+func (doc Document) parseOASObject(object oasObject) ([]reference, error) {
+	var allRefs []reference
 
-	item, err := getFieldFromParent(object)
+	item, err := findObjectInParent(object)
 	if err != nil {
 		return allRefs, err
 	}
 
 	switch item.Kind() {
 	case reflect.Ptr:
-		ref, fields, err := parsePtrItem(item)
+		refPath, fields, err := parsePtrItem(item)
 		if err != nil {
 			return allRefs, err
 		}
 
-		if ref != "" {
-			reference := Reference{
+		if refPath != "" {
+			ref := reference{
 				object: object,
-				path:   ref,
+				path:   refPath,
 			}
-			allRefs = append(allRefs, reference)
+			allRefs = append(allRefs, ref)
 		}
 
 		for _, field := range fields {
-			obj := OASObject{
+			obj := oasObject{
 				parent: item.Interface(),
 				name:   field,
 			}
@@ -154,21 +154,21 @@ func (doc Document) parseOASObject(object OASObject) ([]Reference, error) {
 			allRefs = append(allRefs, objRefs...)
 		}
 	case reflect.Map:
-		refs, keys, err := parseMapItem(item)
+		refPaths, keys, err := parseMapItem(item)
 		if err != nil {
 			return allRefs, err
 		}
 
-		for _, ref := range refs {
-			reference := Reference{
+		for _, refPath := range refPaths {
+			ref := reference{
 				object: object,
-				path:   ref,
+				path:   refPath,
 			}
-			allRefs = append(allRefs, reference)
+			allRefs = append(allRefs, ref)
 		}
 
 		for _, key := range keys {
-			obj := OASObject{
+			obj := oasObject{
 				parent: item.Interface(),
 				name:   key,
 			}
@@ -179,21 +179,21 @@ func (doc Document) parseOASObject(object OASObject) ([]Reference, error) {
 			allRefs = append(allRefs, newRefs...)
 		}
 	case reflect.Slice:
-		refs, indexes, err := parseSliceItem(item)
+		refPaths, indexes, err := parseSliceItem(item)
 		if err != nil {
 			return allRefs, err
 		}
 
-		for _, ref := range refs {
-			reference := Reference{
+		for _, refPath := range refPaths {
+			ref := reference{
 				object: object,
-				path:   ref,
+				path:   refPath,
 			}
-			allRefs = append(allRefs, reference)
+			allRefs = append(allRefs, ref)
 		}
 
 		for _, idx := range indexes {
-			obj := OASObject{
+			obj := oasObject{
 				parent: item.Interface(),
 				idx:    idx,
 			}
@@ -284,7 +284,7 @@ func parseSliceItem(item reflect.Value) ([]string, []int, error) {
 	return refs, indexesToParse, nil
 }
 
-func getFieldFromParent(object OASObject) (reflect.Value, error) {
+func findObjectInParent(object oasObject) (reflect.Value, error) {
 	parentVal := reflect.ValueOf(object.parent)
 	switch parentVal.Kind() {
 	case reflect.Ptr:
@@ -299,7 +299,7 @@ func getFieldFromParent(object OASObject) (reflect.Value, error) {
 	}
 }
 
-func (doc Document) assignReference(ref Reference) error {
+func (doc Document) assignReference(ref reference) error {
 	referencedDocument, err := doc.getReferencedDocument(ref.path)
 	if err != nil {
 		return fmt.Errorf("could not get reference document: %w", err)
@@ -344,6 +344,7 @@ func (doc Document) getItemByPath(refPath string) (interface{}, error) {
 
 func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) {
 	structItemType := structItem.Type()
+
 	for i := 0; i < structItemType.NumField(); i++ {
 		childField := structItemType.Field(i)
 		yamlKey := getYamlKeyFromField(childField)
@@ -355,7 +356,7 @@ func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) 
 	return reflect.Value{}, fmt.Errorf("the field with tag %s could not be found in type %s", tag, structItemType.Name())
 }
 
-func replaceReference(object OASObject, ref interface{}) error {
+func replaceReference(object oasObject, ref interface{}) error {
 	parentVal := reflect.ValueOf(object.parent)
 	refVal := reflect.ValueOf(ref)
 
