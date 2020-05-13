@@ -2,6 +2,7 @@ package openapi
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -26,7 +27,8 @@ const (
 // Document represents single OpenAPI source file and it's content
 // A Document can be dependent on other Documents by using OpenAPI references
 type Document struct {
-	FilePath            string
+	RefDirectory        string
+	FileName            string
 	Root                *OpenAPI
 	ReferencedDocuments map[string]*Document
 }
@@ -45,9 +47,8 @@ type reference struct {
 }
 
 // NewDocument constructs new Document instance
-func NewDocument(filePath string) Document {
+func NewDocument() Document {
 	return Document{
-		FilePath:            filePath,
 		Root:                &OpenAPI{},
 		ReferencedDocuments: make(map[string]*Document),
 	}
@@ -55,9 +56,9 @@ func NewDocument(filePath string) Document {
 
 // ParseDocument takes path to the file that should be parsed and have it's references resolved
 func ParseDocument(path string) (Document, error) {
-	referencedDocument := NewDocument(path)
+	referencedDocument := NewDocument()
 
-	err := referencedDocument.ParseFile()
+	err := referencedDocument.ReadFile(path)
 	if err != nil {
 		return Document{}, err
 	}
@@ -66,12 +67,30 @@ func ParseDocument(path string) (Document, error) {
 	return referencedDocument, err
 }
 
-// ParseFile attempts to read & parse content of file Document points to
-func (doc Document) ParseFile() error {
-	data, err := ioutil.ReadFile(doc.FilePath)
+// Parse unmarshalls the yaml content
+func (doc Document) Parse(data []byte) error {
+	return yaml.Unmarshal([]byte(data), doc.Root)
+}
+
+// Read takes a Reader and parses the content after encountering EOF
+func (doc Document) Read(r io.Reader) error {
+	data, err := ioutil.ReadAll(r)
 	if err != nil {
 		return err
 	}
+
+	return doc.Parse(data)
+}
+
+// ReadFile attempts to read & parse content of file Document points to
+func (doc *Document) ReadFile(path string) error {
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	doc.RefDirectory = filepath.Dir(path)
+	doc.FileName = filepath.Base(path)
 
 	err = yaml.Unmarshal([]byte(data), doc.Root)
 	return err
@@ -87,9 +106,25 @@ func (doc Document) WriteFile(path string) error {
 	return ioutil.WriteFile(path, yaml, os.FileMode(0777))
 }
 
+// Write writes content of a document to a writer
+func (doc Document) Write(w io.Writer) error {
+	yaml, err := doc.YAML()
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(yaml)
+	return err
+}
+
 // YAML converts contents of a document to YAML
 func (doc Document) YAML() ([]byte, error) {
 	return yaml.Marshal(doc.Root)
+}
+
+// SetRefDirectory sets the directory which is used as root for refs relative paths resolution
+func (doc *Document) SetRefDirectory(dir string) {
+	doc.RefDirectory = dir
 }
 
 // ResolveReferences takes a document and tries to find and resolve all references
@@ -386,7 +421,7 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 	}
 
 	documentPath := getDocumentPath(refPath)
-	documentFilePath := filepath.Join(filepath.Dir(doc.FilePath), documentPath)
+	documentFilePath := filepath.Join(doc.RefDirectory, documentPath)
 
 	if document, ok := doc.ReferencedDocuments[documentFilePath]; ok {
 		referencedDocument = document
