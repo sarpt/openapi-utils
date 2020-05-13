@@ -18,7 +18,7 @@ paths:
       summary: Adds user.
       description: Optional extended description in CommonMark or HTML.
       requestBody:
-        $ref: "../../examples/test_common.yaml#/components/requestBodies/UsersRequest"
+        $ref: "test_common.yaml#/components/requestBodies/UsersRequest"
       responses:
         '200':
           $ref: '#/components/responses/UsersResponse'
@@ -28,9 +28,9 @@ paths:
       description: Optional extended description in CommonMark or HTML.
       responses:
         '200':
-          $ref: '../../examples/test_common.yaml#/components/responses/CompaniesResponse'
+          $ref: 'test_common.yaml#/components/responses/CompaniesResponse'
         '403':
-          $ref: '../../examples/test_common.yaml#/components/responses/CompaniesErrorResponse'
+          $ref: 'test_common.yaml#/components/responses/CompaniesErrorResponse'
   /shops:
     get:
       summary: Returns a list of shops.
@@ -49,4 +49,4 @@ components:
             items:
               type: string
     ShopsResponse:
-      $ref: '../../examples/test_common.yaml#/components/responses/ShopsResponse'
+      $ref: 'test_common.yaml#/components/responses/ShopsResponse'

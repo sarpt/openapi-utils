@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -384,17 +385,19 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 		return &doc, nil
 	}
 
-	pathToDocument := getPathToRemoteDocument(refPath)
+	documentPath := getDocumentPath(refPath)
+	documentFilePath := filepath.Join(filepath.Dir(doc.FilePath), documentPath)
 
-	if document, ok := doc.ReferencedDocuments[pathToDocument]; ok {
+	if document, ok := doc.ReferencedDocuments[documentFilePath]; ok {
 		referencedDocument = document
 	} else {
-		parsedDocument, err := ParseDocument(pathToDocument)
+		parsedDocument, err := ParseDocument(documentFilePath)
 		if err != nil {
 			return nil, err
 		}
 
 		referencedDocument = &parsedDocument
+		doc.ReferencedDocuments[documentFilePath] = referencedDocument
 	}
 
 	return referencedDocument, nil

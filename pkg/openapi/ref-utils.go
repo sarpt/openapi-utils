@@ -10,7 +10,7 @@ func splitReference(path string) []string {
 	return strings.Split(path, "#")
 }
 
-func getPathToRemoteDocument(path string) string {
+func getDocumentPath(path string) string {
 	return splitReference(path)[0]
 }
 
