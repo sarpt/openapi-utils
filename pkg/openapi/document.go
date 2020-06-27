@@ -24,20 +24,14 @@ const (
 	YamlTagSeparator = ","
 )
 
-// Document represents single OpenAPI source file and it's content
-// A Document can be dependent on other Documents by using OpenAPI references
+// Document represents single OpenAPI source file and it's content.
+// A Document can be dependent on other Documents by using OpenAPI references.
 type Document struct {
+	Cfg                 Config
 	RefDirectory        string
 	FileName            string
 	Root                *OpenAPI
 	ReferencedDocuments map[string]*Document
-}
-
-// oasObject respresent the object of the OpenAPI schema
-type oasObject struct {
-	parent interface{}
-	name   string
-	idx    int
 }
 
 // reference contains information about OpenAPI object that contains reference and path of reference
@@ -46,17 +40,23 @@ type reference struct {
 	path   string
 }
 
+// Config specifies document handling
+type Config struct {
+	InlineLocalRefs bool
+}
+
 // NewDocument constructs new Document instance
-func NewDocument() Document {
+func NewDocument(cfg Config) Document {
 	return Document{
+		Cfg:                 cfg,
 		Root:                &OpenAPI{},
 		ReferencedDocuments: make(map[string]*Document),
 	}
 }
 
 // ParseDocument takes path to the file that should be parsed and have it's references resolved
-func ParseDocument(path string) (Document, error) {
-	referencedDocument := NewDocument()
+func ParseDocument(cfg Config, path string) (Document, error) {
+	referencedDocument := NewDocument(cfg)
 
 	err := referencedDocument.ReadFile(path)
 	if err != nil {
@@ -69,7 +69,7 @@ func ParseDocument(path string) (Document, error) {
 
 // Parse unmarshalls the yaml content
 func (doc Document) Parse(data []byte) error {
-	return yaml.Unmarshal([]byte(data), doc.Root)
+	return yaml.Unmarshal(data, doc.Root)
 }
 
 // Read takes a Reader and parses the content after encountering EOF
@@ -92,7 +92,7 @@ func (doc *Document) ReadFile(path string) error {
 	doc.RefDirectory = filepath.Dir(path)
 	doc.FileName = filepath.Base(path)
 
-	err = yaml.Unmarshal([]byte(data), doc.Root)
+	err = yaml.Unmarshal(data, doc.Root)
 	return err
 }
 
@@ -127,15 +127,21 @@ func (doc *Document) SetRefDirectory(dir string) {
 	doc.RefDirectory = dir
 }
 
-// ResolveReferences takes a document and tries to find and resolve all references
-// After execution all elements that had not empty Ref properties have their contents replaced with referenced content
+// ResolveReferences takes a document and tries to find and resolve all references.
+// After execution all elements that had not empty Ref properties have their contents replaced with referenced content.
+// References are first sorted before resolution/assignment due to use-case where local reference aliases remote one.
+// TODO:
+// Improve handling of inlineLocal when set to false - local references that were unresolved in referenced documents should
+// be modified (path in $ref changed) in the document being resolved to point to the referenced document.
+// Currently when resolving references to the remote documents, their local references end up in the document being resolved.
+// This behavior ends up creating incorrect output file.
 func (doc Document) ResolveReferences() error {
-	object := oasObject{
+	rootObject := oasObject{
 		parent: &doc,
 		name:   RootItem,
 	}
 
-	refs, err := doc.parseOASObject(object)
+	refs, err := doc.parseOASObject(rootObject)
 	if err != nil {
 		return err
 	}
@@ -145,6 +151,11 @@ func (doc Document) ResolveReferences() error {
 	})
 
 	for _, ref := range refs {
+		isLocal := isLocalReference(ref.path)
+		if doc.Cfg.InlineLocalRefs && isLocal {
+			continue
+		}
+
 		err := doc.assignReference(ref)
 		if err != nil {
 			return err
@@ -154,10 +165,11 @@ func (doc Document) ResolveReferences() error {
 	return nil
 }
 
+// parseOASObject takes an object and returns list of all references that need to be resolved for object to be independent from references objects
 func (doc Document) parseOASObject(object oasObject) ([]reference, error) {
 	var allRefs []reference
 
-	item, err := findObjectInParent(object)
+	item, err := object.Get()
 	if err != nil {
 		return allRefs, err
 	}
@@ -175,19 +187,19 @@ func (doc Document) parseOASObject(object oasObject) ([]reference, error) {
 				path:   refPath,
 			}
 			allRefs = append(allRefs, ref)
-		}
+		} else { // when refPath is in an oas object that is not a slice or map, other tahn $ref fields can be ignored per specification
+			for _, field := range fields {
+				obj := oasObject{
+					parent: item.Interface(),
+					name:   field,
+				}
+				objRefs, err := doc.parseOASObject(obj)
+				if err != nil {
+					return allRefs, err
+				}
 
-		for _, field := range fields {
-			obj := oasObject{
-				parent: item.Interface(),
-				name:   field,
+				allRefs = append(allRefs, objRefs...)
 			}
-			objRefs, err := doc.parseOASObject(obj)
-			if err != nil {
-				return allRefs, err
-			}
-
-			allRefs = append(allRefs, objRefs...)
 		}
 	case reflect.Map:
 		refPaths, keys, err := parseMapItem(item)
@@ -261,7 +273,7 @@ func parsePtrItem(item reflect.Value) (string, []string, error) {
 		switch childItem.Kind() {
 		case reflect.String:
 			if itemType.Field(i).Name == Ref {
-				return childItem.String(), fieldsToParse, nil
+				return childItem.String(), []string{}, nil // when ref found in an object then no need to parse other fields
 			}
 		case reflect.Struct, reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
 			fieldsToParse = append(fieldsToParse, itemType.Field(i).Name)
@@ -320,21 +332,7 @@ func parseSliceItem(item reflect.Value) ([]string, []int, error) {
 	return refs, indexesToParse, nil
 }
 
-func findObjectInParent(object oasObject) (reflect.Value, error) {
-	parentVal := reflect.ValueOf(object.parent)
-	switch parentVal.Kind() {
-	case reflect.Ptr:
-		return parentVal.Elem().FieldByName(object.name), nil
-	case reflect.Map:
-		_, val, err := itemFromMapByName(parentVal, object.name)
-		return val, err
-	case reflect.Slice:
-		return parentVal.Index(object.idx), nil
-	default:
-		return reflect.Value{}, fmt.Errorf("provided parent for %s field is not a correct type", object.name)
-	}
-}
-
+// assignReference replaces ref either with inline object or a local reference
 func (doc Document) assignReference(ref reference) error {
 	referencedDocument, err := doc.getReferencedDocument(ref.path)
 	if err != nil {
@@ -392,6 +390,7 @@ func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) 
 	return reflect.Value{}, fmt.Errorf("the field with tag %s could not be found in type %s", tag, structItemType.Name())
 }
 
+// replaceReference unsets the reference and inlines refered object
 func replaceReference(object oasObject, ref interface{}) error {
 	parentVal := reflect.ValueOf(object.parent)
 	refVal := reflect.ValueOf(ref)
@@ -426,7 +425,7 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 	if document, ok := doc.ReferencedDocuments[documentFilePath]; ok {
 		referencedDocument = document
 	} else {
-		parsedDocument, err := ParseDocument(documentFilePath)
+		parsedDocument, err := ParseDocument(doc.Cfg, documentFilePath)
 		if err != nil {
 			return nil, err
 		}

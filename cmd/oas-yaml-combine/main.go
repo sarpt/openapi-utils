@@ -10,20 +10,27 @@ import (
 	"github.com/sarpt/openapi-utils/pkg/openapi"
 )
 
-var inputFile *string
-var outputFile *string
-var refDirectory *string
+var (
+	inputFile       *string
+	outputFile      *string
+	refDirectory    *string
+	inlineLocalRefs *bool
+)
 
 func init() {
 	inputFile = flag.String("input-file", "", "path to the input yaml file to be processed. Providing input-file sets the ref directory to the parent directory of provided input-file path")
 	outputFile = flag.String("output-file", "", "path to the output yaml file")
 	refDirectory = flag.String("ref-dir", "", "directory used as a root for ref relative paths resolution. By default current working directory is used, unless the input-file is provided")
+	inlineLocalRefs = flag.Bool("inline-local", false, "should local refs be inlined in place when resolved. When set to false, local references are left in the place. False by default")
 	flag.Parse()
 }
 
 func main() {
-	rootDocument := openapi.NewDocument()
+	rootCfg := openapi.Config{
+		InlineLocalRefs: *inlineLocalRefs,
+	}
 
+	rootDocument := openapi.NewDocument(rootCfg)
 	if *inputFile != "" {
 		inputFilePath, err := filepath.Abs(*inputFile)
 		if err != nil {
