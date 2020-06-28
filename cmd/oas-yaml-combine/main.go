@@ -15,19 +15,22 @@ var (
 	outputFile      *string
 	refDirectory    *string
 	inlineLocalRefs *bool
+	keepLocalRefs   *bool
 )
 
 func init() {
 	inputFile = flag.String("input-file", "", "path to the input yaml file to be processed. Providing input-file sets the ref directory to the parent directory of provided input-file path")
 	outputFile = flag.String("output-file", "", "path to the output yaml file")
 	refDirectory = flag.String("ref-dir", "", "directory used as a root for ref relative paths resolution. By default current working directory is used, unless the input-file is provided")
-	inlineLocalRefs = flag.Bool("inline-local", false, "should local refs be inlined in place when resolved. When set to false, local references are left in the place. False by default")
+	inlineLocalRefs = flag.Bool("inline-local", false, "should local refs be inlined in place when resolved. When set to false, local references are left in place since they are skipped from resolving. False by default")
+	keepLocalRefs = flag.Bool("keep-local", false, "keep local refs after inlining. Makes sense only when inline-local is specified as true, otherwise has no effect in order to prevent outputting incorrect yaml file with missing references")
 	flag.Parse()
 }
 
 func main() {
 	rootCfg := openapi.Config{
 		InlineLocalRefs: *inlineLocalRefs,
+		KeepLocalRefs:   *keepLocalRefs,
 	}
 
 	rootDocument := openapi.NewDocument(rootCfg)

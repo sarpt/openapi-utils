@@ -43,6 +43,7 @@ type reference struct {
 // Config specifies document handling
 type Config struct {
 	InlineLocalRefs bool
+	KeepLocalRefs   bool
 }
 
 // NewDocument constructs new Document instance
@@ -153,10 +154,6 @@ func (doc Document) ResolveReferences() error {
 	})
 
 	for _, ref := range refs {
-		if !doc.Cfg.InlineLocalRefs && isLocalReference(ref.path) {
-			continue
-		}
-
 		err := doc.replaceReference(ref)
 		if err != nil {
 			return err
@@ -168,47 +165,68 @@ func (doc Document) ResolveReferences() error {
 
 // replaceReference replaces ref either with inline object or a local reference
 func (doc Document) replaceReference(ref reference) error {
+	isRefLocal := isLocalReference(ref.path)
+	if !doc.Cfg.InlineLocalRefs && isRefLocal {
+		return nil
+	}
+
 	referencedDocument, err := doc.getReferencedDocument(ref.path)
 	if err != nil {
 		return fmt.Errorf("could not get reference document: %w", err)
 	}
 
-	refItem, err := referencedDocument.getReferencedValueByPath(ref.path)
+	refObject, err := referencedDocument.getReferencedObjectByPath(ref.path)
 	if err != nil {
 		return err
 	}
 
-	return ref.object.Set(refItem)
+	err = ref.object.Set(refObject.instance)
+	if err != nil {
+		return err
+	}
+
+	if doc.Cfg.KeepLocalRefs || !doc.Cfg.InlineLocalRefs || !isRefLocal {
+		return nil
+	}
+
+	return refObject.Set(nil)
 }
 
 // getReferencedValueByPath walks the provided reference path, trying obtain the oas object
-func (doc Document) getReferencedValueByPath(refPath string) (interface{}, error) {
+func (doc Document) getReferencedObjectByPath(refPath string) (OasObject, error) {
+	var object OasObject
+	var err error
+
 	itemNames := referencePathToItems(refPath)
-	var parentValue reflect.Value = reflect.ValueOf(doc.Root)
+	var parentValue reflect.Value = reflect.ValueOf(&doc.Root).Elem()
 
 	for _, itemName := range itemNames {
 		switch parentValue.Kind() {
 		case reflect.Ptr:
-			parentElem := parentValue.Elem()
-			childItem, err := getFieldByTag(itemName, parentElem)
+			childItemName, err := getFieldNameByTag(itemName, parentValue.Elem())
 			if err != nil {
-				return nil, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
+				return object, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
 			}
 
-			parentValue = childItem
+			object, err = NewOasObjectByName(parentValue.Interface(), childItemName)
+			if err != nil {
+				return object, err
+			}
+
+			parentValue = reflect.ValueOf(object.instance)
 		case reflect.Map:
-			_, val, err := itemFromMapByName(parentValue, itemName)
+			object, err = NewOasObjectByName(parentValue.Interface(), itemName)
 			if err != nil {
-				return nil, fmt.Errorf("could not resolve path %s due to error: %w", refPath, err)
+				return object, err
 			}
 
-			parentValue = val
+			parentValue = reflect.ValueOf(object.instance)
 		default:
-			return nil, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
+			return object, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
 		}
 	}
 
-	return parentValue.Interface(), nil
+	return object, nil
 }
 
 func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
@@ -239,18 +257,18 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 	return referencedDocument, nil
 }
 
-func getFieldByTag(tag string, structItem reflect.Value) (reflect.Value, error) {
+func getFieldNameByTag(tag string, structItem reflect.Value) (string, error) {
 	structItemType := structItem.Type()
 
 	for i := 0; i < structItemType.NumField(); i++ {
 		childField := structItemType.Field(i)
 		yamlKey := getYamlKeyFromField(childField)
 		if yamlKey == tag {
-			return structItem.Field(i), nil
+			return childField.Name, nil
 		}
 	}
 
-	return reflect.Value{}, fmt.Errorf("the field with tag %s could not be found in type %s", tag, structItemType.Name())
+	return "", fmt.Errorf("the field name with tag %s could not be found in type %s", tag, structItemType.Name())
 }
 
 func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect.Value, error) {
