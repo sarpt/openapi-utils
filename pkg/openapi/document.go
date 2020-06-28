@@ -135,6 +135,8 @@ func (doc *Document) SetRefDirectory(dir string) {
 // be modified (path in $ref changed) in the document being resolved to point to the referenced document.
 // Currently when resolving references to the remote documents, their local references end up in the document being resolved.
 // This behavior ends up creating incorrect output file.
+// Current workaround is that referenced documents are parsed with different inlineLocal config from the root document.
+// It's fine for now, but ideally referenced documents should resue config of parent.
 func (doc Document) ResolveReferences() error {
 	rootObject, err := NewOasObjectByName(&doc, RootItem)
 	if err != nil {
@@ -151,8 +153,7 @@ func (doc Document) ResolveReferences() error {
 	})
 
 	for _, ref := range refs {
-		isLocal := isLocalReference(ref.path)
-		if doc.Cfg.InlineLocalRefs && isLocal {
+		if !doc.Cfg.InlineLocalRefs && isLocalReference(ref.path) {
 			continue
 		}
 
@@ -223,7 +224,10 @@ func (doc Document) getReferencedDocument(refPath string) (*Document, error) {
 	if document, ok := doc.ReferencedDocuments[documentFilePath]; ok {
 		referencedDocument = document
 	} else {
-		parsedDocument, err := ParseDocument(doc.Cfg, documentFilePath)
+		cfg := Config{
+			InlineLocalRefs: true,
+		}
+		parsedDocument, err := ParseDocument(cfg, documentFilePath)
 		if err != nil {
 			return nil, err
 		}

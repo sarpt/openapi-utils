@@ -24,51 +24,50 @@ type OasObject struct {
 
 // NewOasObjectByName takes parent and a name under which object can be found
 func NewOasObjectByName(parent interface{}, name string) (OasObject, error) {
-	obj := OasObject{
+	obj := &OasObject{
 		parent: parent,
 		name:   name,
 	}
 
-	instance, err := obj.parse()
+	err := obj.parse()
 	if err != nil {
-		return obj, err
+		return *obj, err
 	}
 
-	obj.instance = instance
-
-	return obj, nil
+	return *obj, nil
 }
 
 // NewOasObjectByIdx takes parent and an index under which object can be found
 func NewOasObjectByIdx(parent interface{}, idx int) (OasObject, error) {
-	obj := OasObject{
+	obj := &OasObject{
 		parent: parent,
 		idx:    idx,
 	}
 
-	instance, err := obj.parse()
+	err := obj.parse()
 	if err != nil {
-		return obj, err
+		return *obj, err
 	}
 
-	obj.instance = instance
-
-	return obj, nil
+	return *obj, nil
 }
 
-// parse returns the interface of the OpenAPI object that is pointed by the instance.
-func (o OasObject) parse() (interface{}, error) {
+// parse retrieves and fills the OpenAPI instance.
+func (o *OasObject) parse() error {
 	parentVal := reflect.ValueOf(o.parent)
 	switch parentVal.Kind() {
 	case reflect.Ptr:
-		return parentVal.Elem().FieldByName(o.name).Interface(), nil
+		o.instance = parentVal.Elem().FieldByName(o.name).Interface()
+		return nil
 	case reflect.Map:
 		_, val, err := itemFromMapByName(parentVal, o.name)
-		return val.Interface(), err
+		o.instance = val.Interface()
+		return err
 	case reflect.Slice:
-		return parentVal.Index(o.idx).Interface(), nil
+		o.instance = parentVal.Index(o.idx).Interface()
+		return nil
 	default:
-		return nil, ErrIncorrectParent
+		return ErrIncorrectParent
 	}
 }
 
