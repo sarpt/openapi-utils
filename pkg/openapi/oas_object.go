@@ -1,15 +1,21 @@
 package openapi
 
 import (
-	"fmt"
+	"errors"
 	"reflect"
 )
 
 var (
 	// ErrIncorrectParent occurs when instance of oasObject has parent that cannot be used to find the object.
-	ErrIncorrectParent = fmt.Errorf("parent has incorrect type")
+	ErrIncorrectParent = errors.New("parent has incorrect type")
 	// ErrIncorrectObjectType occurs when underlying instance of object has incorrect type and cannot be parsed.
-	ErrIncorrectObjectType = fmt.Errorf("object has incorrect type")
+	ErrIncorrectObjectType = errors.New("object has incorrect type")
+	// ErrNoValueWithKey occurs when for specified map and key, the value could not be retrieved due to key missing in the map
+	ErrNoValueWithKey = errors.New("no map value matches specified key")
+	// ErrFieldWithNameUnusable occurs when for specified field name, the value is unusable either by no field being present or field being zero pointer
+	ErrFieldWithNameUnusable = errors.New("field with specified name is unusable")
+	// ErrFieldWithNameNotInType occurs when for specified field name, the parent type has no child field matching i
+	ErrFieldWithNameNotInType = errors.New("field with specified is not specified by type")
 )
 
 // OasObject respresent the object of the OpenAPI schema.
@@ -57,12 +63,21 @@ func (o *OasObject) parse() error {
 	parentVal := reflect.ValueOf(o.parent)
 	switch parentVal.Kind() {
 	case reflect.Ptr:
-		o.instance = parentVal.Elem().FieldByName(o.name).Interface()
+		field := parentVal.Elem().FieldByName(o.name)
+		if field.IsZero() {
+			return ErrFieldWithNameUnusable
+		}
+
+		o.instance = field.Interface()
 		return nil
 	case reflect.Map:
 		_, val, err := itemFromMapByName(parentVal, o.name)
+		if err != nil {
+			return err
+		}
+
 		o.instance = val.Interface()
-		return err
+		return nil
 	case reflect.Slice:
 		o.instance = parentVal.Index(o.idx).Interface()
 		return nil
@@ -71,8 +86,40 @@ func (o *OasObject) parse() error {
 	}
 }
 
-// Set unsets the underlying object and sets a provided value.
-func (o OasObject) Set(val interface{}) error {
+// Init force for the underlying OasObject to be replaced with zero value
+// For OasObject which is of map type it means making a map that can be used
+// For OasObject which is an entry inside a map it means creating entry in a map
+// Slice to be implemented (does $ref permit indexes inside references? And if it does, are there any referencable elements in a slice?)
+func (o *OasObject) Init() error {
+	parentType := reflect.TypeOf(o.parent)
+	objectType := parentType.Elem()
+
+	switch parentType.Kind() {
+	case reflect.Ptr:
+		structField, ok := objectType.FieldByName(o.name)
+		if !ok {
+			return ErrFieldWithNameNotInType
+		}
+
+		// Slices to be implemented
+		if structField.Type.Kind() != reflect.Map {
+			return nil
+		}
+
+		newMap := reflect.MakeMap(structField.Type).Interface()
+		o.Set(newMap)
+	case reflect.Map:
+		childVal := reflect.New(objectType).Elem().Interface()
+		o.Set(childVal)
+	default:
+		return ErrIncorrectParent
+	}
+
+	return nil
+}
+
+// Set replaces the underlying object with a provided value.
+func (o *OasObject) Set(val interface{}) error {
 	parentVal := reflect.ValueOf(o.parent)
 	refVal := reflect.ValueOf(val)
 
@@ -83,17 +130,22 @@ func (o OasObject) Set(val interface{}) error {
 		field := parentVal.Elem().FieldByName(o.name)
 		field.Set(refVal)
 	case reflect.Map:
-		key, _, err := itemFromMapByName(parentVal, o.name)
-		if err != nil {
-			return err
-		}
-
-		parentVal.SetMapIndex(key, refVal)
+		childKey := reflect.New(reflect.TypeOf(o.parent).Key()).Elem()
+		childKey.Set(reflect.ValueOf(o.name))
+		parentVal.SetMapIndex(childKey, refVal)
 	default:
 		return ErrIncorrectParent
 	}
 
+	o.instance = val
 	return nil
+}
+
+// Unset removes value, removing instance of OpenAPi object from a document.
+// Note that depending on the options of the parent document, the copy of this object can be present someplace else in the document after unsetting.
+// After calling Unset, calling Set has unspecified behavior and should be considered invalid as it can either crash at runtime or replace other objects under the same parent.
+func (o OasObject) Unset() error {
+	return o.Set(nil)
 }
 
 // references returns list of all references that need to be resolved for object to be independent from its references.
@@ -262,4 +314,15 @@ func parseSliceValue(value reflect.Value) ([]string, []int, error) {
 	}
 
 	return refs, indexesToParse, nil
+}
+
+func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect.Value, error) {
+	mapIter := mapVal.MapRange()
+	for mapIter.Next() {
+		if mapIter.Key().String() == key {
+			return mapIter.Key(), mapIter.Value(), nil
+		}
+	}
+
+	return reflect.Value{}, reflect.Value{}, ErrNoValueWithKey
 }

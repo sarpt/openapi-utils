@@ -1,6 +1,7 @@
 package openapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -22,6 +23,11 @@ const (
 	YamlTag = "yaml"
 	// YamlTagSeparator is a symbol which separates YAML key in tag from flags
 	YamlTagSeparator = ","
+)
+
+var (
+	// ErrNoFieldWithTag informs that struct has no field/element (direct descendant) with specified tag
+	ErrNoFieldWithTag = errors.New("could not find field with specified tag")
 )
 
 // Document represents single OpenAPI source file and it's content.
@@ -131,13 +137,6 @@ func (doc *Document) SetRefDirectory(dir string) {
 // ResolveReferences takes a document and tries to find and resolve all references.
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content.
 // References are first sorted before resolution/assignment due to use-case where local reference aliases remote one.
-// TODO:
-// Improve handling of inlineLocal when set to false - local references that were unresolved in referenced documents should
-// be modified (path in $ref changed) in the document being resolved to point to the referenced document.
-// Currently when resolving references to the remote documents, their local references end up in the document being resolved.
-// This behavior ends up creating incorrect output file.
-// Current workaround is that referenced documents are parsed with different inlineLocal config from the root document.
-// It's fine for now, but ideally referenced documents should resue config of parent.
 func (doc Document) ResolveReferences() error {
 	rootObject, err := NewOasObjectByName(&doc, RootItem)
 	if err != nil {
@@ -163,13 +162,42 @@ func (doc Document) ResolveReferences() error {
 	return nil
 }
 
-// replaceReference replaces ref either with inline object or a local reference
-func (doc Document) replaceReference(ref reference) error {
-	isRefLocal := isLocalReference(ref.path)
-	if !doc.Cfg.InlineLocalRefs && isRefLocal {
+func (doc Document) replaceReference(ref reference) error { // method on reference instead on document? 'isLocal' could be calculated at creation time, or reference could be an interface that 'local' and 'remote' satisfy by implementing "replace". To be considered
+	if !isLocalReference(ref.path) {
+		return doc.replaceRemoteReference(ref)
+	}
+
+	if !doc.Cfg.InlineLocalRefs {
 		return nil
 	}
 
+	return doc.replaceLocalReference(ref)
+}
+
+func (doc Document) replaceLocalReference(ref reference) error {
+	referencedDocument, err := doc.getReferencedDocument(ref.path)
+	if err != nil {
+		return fmt.Errorf("could not get reference document: %w", err)
+	}
+
+	referencedObject, err := referencedDocument.getReferencedObjectByPath(ref.path)
+	if err != nil {
+		return err
+	}
+
+	err = ref.object.Set(referencedObject.instance)
+	if err != nil {
+		return err
+	}
+
+	if doc.Cfg.KeepLocalRefs || !doc.Cfg.InlineLocalRefs {
+		return nil
+	}
+
+	return referencedObject.Unset()
+}
+
+func (doc Document) replaceRemoteReference(ref reference) error {
 	referencedDocument, err := doc.getReferencedDocument(ref.path)
 	if err != nil {
 		return fmt.Errorf("could not get reference document: %w", err)
@@ -180,16 +208,13 @@ func (doc Document) replaceReference(ref reference) error {
 		return err
 	}
 
-	err = ref.object.Set(refObject.instance)
+	localComponentsPath := convertRemoteToLocalPath(ref.path)
+	componentsObject, err := doc.getOrCreatePath(localComponentsPath)
 	if err != nil {
 		return err
 	}
 
-	if doc.Cfg.KeepLocalRefs || !doc.Cfg.InlineLocalRefs || !isRefLocal {
-		return nil
-	}
-
-	return refObject.Set(nil)
+	return componentsObject.Set(refObject.instance)
 }
 
 // getReferencedValueByPath walks the provided reference path, trying obtain the oas object
@@ -198,7 +223,7 @@ func (doc Document) getReferencedObjectByPath(refPath string) (OasObject, error)
 	var err error
 
 	itemNames := referencePathToItems(refPath)
-	var parentValue reflect.Value = reflect.ValueOf(&doc.Root).Elem()
+	var parentValue reflect.Value = reflect.ValueOf(&doc.Root).Elem() // since parentValue is reused further with addressable values, the initializer has to addressable too (meaning, not a copy of a pointer to root)
 
 	for _, itemName := range itemNames {
 		switch parentValue.Kind() {
@@ -218,6 +243,56 @@ func (doc Document) getReferencedObjectByPath(refPath string) (OasObject, error)
 			object, err = NewOasObjectByName(parentValue.Interface(), itemName)
 			if err != nil {
 				return object, err
+			}
+
+			parentValue = reflect.ValueOf(object.instance)
+		default:
+			return object, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
+		}
+	}
+
+	return object, nil
+}
+
+// getOrCreatePath walks the provided reference path, trying obtain the oas object and creating it if it does not exists.
+// TODO: this function is nearly identical to the getReferencedObjectByPath. Common function could be specified "walkPath" that takes callback.
+// Or just paremtrize the function to force init of objects when necessary (blerh).
+// I cannot be bothered to do this in this commit.
+func (doc Document) getOrCreatePath(refPath string) (OasObject, error) {
+	var object OasObject
+	var err error
+
+	itemNames := referencePathToItems(refPath)
+	var parentValue reflect.Value = reflect.ValueOf(&doc.Root).Elem() // since parentValue is reused further with addressable values, the initializer has to addressable too (meaning, not a copy of a pointer to root)
+
+	for _, itemName := range itemNames {
+		switch parentValue.Kind() {
+		case reflect.Ptr:
+			childItemName, err := getFieldNameByTag(itemName, parentValue.Elem())
+			if err != nil {
+				return object, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
+			}
+
+			object, err = NewOasObjectByName(parentValue.Interface(), childItemName)
+			if err != nil && !errors.Is(err, ErrFieldWithNameUnusable) {
+				return object, err
+			}
+
+			if errors.Is(err, ErrFieldWithNameUnusable) {
+				err = object.Init()
+				if err != nil {
+					return object, err
+				}
+			}
+
+			parentValue = reflect.ValueOf(object.instance)
+		case reflect.Map:
+			object, err = NewOasObjectByName(parentValue.Interface(), itemName)
+			if errors.Is(err, ErrNoValueWithKey) {
+				err = object.Init()
+				if err != nil {
+					return object, err
+				}
 			}
 
 			parentValue = reflect.ValueOf(object.instance)
@@ -268,18 +343,7 @@ func getFieldNameByTag(tag string, structItem reflect.Value) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("the field name with tag %s could not be found in type %s", tag, structItemType.Name())
-}
-
-func itemFromMapByName(mapVal reflect.Value, key string) (reflect.Value, reflect.Value, error) {
-	mapIter := mapVal.MapRange()
-	for mapIter.Next() {
-		if mapIter.Key().String() == key {
-			return mapIter.Key(), mapIter.Value(), nil
-		}
-	}
-
-	return reflect.Value{}, reflect.Value{}, fmt.Errorf("could not find %s key in map", key)
+	return "", ErrNoFieldWithTag
 }
 
 func getYamlKeyFromField(field reflect.StructField) string {

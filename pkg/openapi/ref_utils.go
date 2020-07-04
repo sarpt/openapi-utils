@@ -1,26 +1,42 @@
 package openapi
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+const (
+	referenceSeparator = '#'
+	pathSeparator      = "/"
+)
 
 func isLocalReference(path string) bool {
-	return strings.IndexRune(path, '#') == 0
+	return strings.IndexRune(path, referenceSeparator) == 0
 }
 
-func splitReference(path string) []string {
-	return strings.Split(path, "#")
+func splitReferenceByHash(path string) []string {
+	return strings.Split(path, string(referenceSeparator))
 }
 
 func getDocumentPath(path string) string {
-	return splitReference(path)[0]
+	return splitReferenceByHash(path)[0]
 }
 
 func getPathToReference(path string) string {
-	return splitReference(path)[1]
+	if isLocalReference(path) {
+		return path
+	}
+
+	return splitReferenceByHash(path)[1]
+}
+
+func convertRemoteToLocalPath(path string) string {
+	return fmt.Sprintf("%s%s", string(referenceSeparator), getPathToReference(path))
 }
 
 func referencePathToItems(path string) []string {
 	componentReference := getPathToReference(path)
-	return strings.Split(componentReference, "/")[1:]
+	return strings.Split(componentReference, pathSeparator)[1:]
 }
 
 func sortReferences(refI, refJ reference) bool {
