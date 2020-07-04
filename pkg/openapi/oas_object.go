@@ -86,7 +86,7 @@ func (o *OasObject) parse() error {
 	}
 }
 
-// Init force for the underlying OasObject to be replaced with zero value
+// Init forces the underlying OasObject to be replaced with zero value
 // For OasObject which is of map type it means making a map that can be used
 // For OasObject which is an entry inside a map it means creating entry in a map
 // Slice to be implemented (does $ref permit indexes inside references? And if it does, are there any referencable elements in a slice?)

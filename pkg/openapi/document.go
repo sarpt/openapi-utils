@@ -23,6 +23,8 @@ const (
 	YamlTag = "yaml"
 	// YamlTagSeparator is a symbol which separates YAML key in tag from flags
 	YamlTagSeparator = ","
+	// RefTag is a tag which specifies symbol as a OpenAPI $ref reference valua
+	RefTag = "$ref"
 )
 
 var (
@@ -214,7 +216,27 @@ func (doc Document) replaceRemoteReference(ref reference) error {
 		return err
 	}
 
-	return componentsObject.Set(refObject.instance)
+	componentsObject.Set(refObject.instance)
+	if err != nil {
+		return err
+	}
+
+	return changeRefPath(ref.object, localComponentsPath)
+}
+
+func changeRefPath(o OasObject, newRefPath string) error {
+	oasObjectStruct := reflect.ValueOf(o.instance).Elem()
+	newRefPathValue := reflect.ValueOf(newRefPath)
+
+	refFieldName, err := getFieldNameByTag(RefTag, oasObjectStruct)
+	if err != nil {
+		return err
+	}
+
+	refField := oasObjectStruct.FieldByName(refFieldName)
+	refField.Set(newRefPathValue)
+
+	return nil
 }
 
 // getReferencedValueByPath walks the provided reference path, trying obtain the oas object
