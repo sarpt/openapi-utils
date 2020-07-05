@@ -31,8 +31,9 @@ func init() {
 
 func main() {
 	rootCfg := openapi.Config{
-		InlineLocalRefs: *inlineLocalRefs,
-		KeepLocalRefs:   *keepLocalRefs,
+		InlineLocalRefs:  *inlineLocalRefs,
+		InlineRemoteRefs: *inlineRemoteRefs,
+		KeepLocalRefs:    *keepLocalRefs,
 	}
 
 	rootDocument := openapi.NewDocument(rootCfg)

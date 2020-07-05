@@ -50,8 +50,9 @@ type reference struct {
 
 // Config specifies document handling
 type Config struct {
-	InlineLocalRefs bool
-	KeepLocalRefs   bool
+	InlineLocalRefs  bool
+	InlineRemoteRefs bool
+	KeepLocalRefs    bool
 }
 
 // NewDocument constructs new Document instance
@@ -210,33 +211,23 @@ func (doc Document) replaceRemoteReference(ref reference) error {
 		return err
 	}
 
-	localComponentsPath := convertRemoteToLocalPath(ref.path)
-	componentsObject, err := doc.getOrCreatePath(localComponentsPath)
-	if err != nil {
-		return err
+	var targetObject OasObject
+	if !doc.Cfg.InlineRemoteRefs {
+		localPath := convertRemoteToLocalPath(ref.path)
+		targetObject, err = doc.getOrCreatePath(localPath)
+		if err != nil {
+			return err
+		}
+
+		err = ref.object.ChangeRefPath(localPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		targetObject = ref.object
 	}
 
-	componentsObject.Set(refObject.instance)
-	if err != nil {
-		return err
-	}
-
-	return changeRefPath(ref.object, localComponentsPath)
-}
-
-func changeRefPath(o OasObject, newRefPath string) error {
-	oasObjectStruct := reflect.ValueOf(o.instance).Elem()
-	newRefPathValue := reflect.ValueOf(newRefPath)
-
-	refFieldName, err := getFieldNameByTag(RefTag, oasObjectStruct)
-	if err != nil {
-		return err
-	}
-
-	refField := oasObjectStruct.FieldByName(refFieldName)
-	refField.Set(newRefPathValue)
-
-	return nil
+	return targetObject.Set(refObject.instance)
 }
 
 // getReferencedValueByPath walks the provided reference path, trying obtain the oas object

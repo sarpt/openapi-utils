@@ -148,6 +148,22 @@ func (o OasObject) Unset() error {
 	return o.Set(nil)
 }
 
+// ChangeRefPath sets a $ref property of an object
+func (o OasObject) ChangeRefPath(newRefPath string) error {
+	oasObjectStruct := reflect.ValueOf(o.instance).Elem()
+	newRefPathValue := reflect.ValueOf(newRefPath)
+
+	refFieldName, err := getFieldNameByTag(RefTag, oasObjectStruct)
+	if err != nil {
+		return err
+	}
+
+	refField := oasObjectStruct.FieldByName(refFieldName)
+	refField.Set(newRefPathValue)
+
+	return nil
+}
+
 // references returns list of all references that need to be resolved for object to be independent from its references.
 // That list includes children references along with object's own references since parsing is done recursively until refs in all possible descendants are found.
 func (o OasObject) references() ([]reference, error) {
