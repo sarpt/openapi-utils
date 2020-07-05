@@ -141,7 +141,7 @@ func (doc *Document) SetRefDirectory(dir string) {
 // After execution all elements that had not empty Ref properties have their contents replaced with referenced content.
 // References are first sorted before resolution/assignment due to use-case where local reference aliases remote one.
 func (doc Document) ResolveReferences() error {
-	rootObject, err := NewOasObjectByName(&doc, RootItem)
+	rootObject, err := OasObjectByName(&doc, RootItem, false)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func (doc Document) replaceLocalReference(ref reference) error {
 		return fmt.Errorf("could not get reference document: %w", err)
 	}
 
-	referencedObject, err := referencedDocument.getReferencedObjectByPath(ref.path)
+	referencedObject, err := referencedDocument.getOrCreateObjectByPath(ref.path, false)
 	if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (doc Document) replaceRemoteReference(ref reference) error {
 		return fmt.Errorf("could not get reference document: %w", err)
 	}
 
-	refObject, err := referencedDocument.getReferencedObjectByPath(ref.path)
+	refObject, err := referencedDocument.getOrCreateObjectByPath(ref.path, false)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,8 @@ func (doc Document) replaceRemoteReference(ref reference) error {
 	var targetObject OasObject
 	if !doc.Cfg.InlineRemoteRefs {
 		localPath := convertRemoteToLocalPath(ref.path)
-		targetObject, err = doc.getOrCreatePath(localPath)
+		forceCreate := true
+		targetObject, err = doc.getOrCreateObjectByPath(localPath, forceCreate)
 		if err != nil {
 			return err
 		}
@@ -230,8 +231,8 @@ func (doc Document) replaceRemoteReference(ref reference) error {
 	return targetObject.Set(refObject.instance)
 }
 
-// getReferencedValueByPath walks the provided reference path, trying obtain the oas object
-func (doc Document) getReferencedObjectByPath(refPath string) (OasObject, error) {
+// getOrCreateObjectByPath walks the provided reference path, trying obtain the oas object and creating it (by changing it to zero value) if it does not exists.
+func (doc Document) getOrCreateObjectByPath(refPath string, forceCreate bool) (OasObject, error) {
 	var object OasObject
 	var err error
 
@@ -246,71 +247,21 @@ func (doc Document) getReferencedObjectByPath(refPath string) (OasObject, error)
 				return object, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
 			}
 
-			object, err = NewOasObjectByName(parentValue.Interface(), childItemName)
+			object, err = OasObjectByName(parentValue.Interface(), childItemName, forceCreate)
 			if err != nil {
 				return object, err
 			}
 
 			parentValue = reflect.ValueOf(object.instance)
 		case reflect.Map:
-			object, err = NewOasObjectByName(parentValue.Interface(), itemName)
+			object, err = OasObjectByName(parentValue.Interface(), itemName, forceCreate)
 			if err != nil {
 				return object, err
 			}
 
 			parentValue = reflect.ValueOf(object.instance)
 		default:
-			return object, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
-		}
-	}
-
-	return object, nil
-}
-
-// getOrCreatePath walks the provided reference path, trying obtain the oas object and creating it if it does not exists.
-// TODO: this function is nearly identical to the getReferencedObjectByPath. Common function could be specified "walkPath" that takes callback.
-// Or just paremtrize the function to force init of objects when necessary (blerh).
-// I cannot be bothered to do this in this commit.
-func (doc Document) getOrCreatePath(refPath string) (OasObject, error) {
-	var object OasObject
-	var err error
-
-	itemNames := referencePathToItems(refPath)
-	var parentValue reflect.Value = reflect.ValueOf(&doc.Root).Elem() // since parentValue is reused further with addressable values, the initializer has to addressable too (meaning, not a copy of a pointer to root)
-
-	for _, itemName := range itemNames {
-		switch parentValue.Kind() {
-		case reflect.Ptr:
-			childItemName, err := getFieldNameByTag(itemName, parentValue.Elem())
-			if err != nil {
-				return object, fmt.Errorf("could not find item %s in path %s: %w", itemName, refPath, err)
-			}
-
-			object, err = NewOasObjectByName(parentValue.Interface(), childItemName)
-			if err != nil && !errors.Is(err, ErrFieldWithNameUnusable) {
-				return object, err
-			}
-
-			if errors.Is(err, ErrFieldWithNameUnusable) {
-				err = object.Init()
-				if err != nil {
-					return object, err
-				}
-			}
-
-			parentValue = reflect.ValueOf(object.instance)
-		case reflect.Map:
-			object, err = NewOasObjectByName(parentValue.Interface(), itemName)
-			if errors.Is(err, ErrNoValueWithKey) {
-				err = object.Init()
-				if err != nil {
-					return object, err
-				}
-			}
-
-			parentValue = reflect.ValueOf(object.instance)
-		default:
-			return object, fmt.Errorf("could not resolve path %s due to path including incorrect items", refPath)
+			return object, fmt.Errorf("could not resolve path %s due to item %s being incorrect", refPath, itemName)
 		}
 	}
 
