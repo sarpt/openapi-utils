@@ -25,8 +25,6 @@ SOFTWARE.
 # licenses of dependencies #
 ## yaml go package original Apache 2.0 LICENSE ##
 
-All the remaining project files are covered by the Apache license:
-
 Copyright (c) 2011-2019 Canonical Ltd
 
 Licensed under the Apache License, Version 2.0 (the "License");
