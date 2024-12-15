@@ -84,7 +84,7 @@ func oasYamlCombine(inputFilePath *C.char, outputFilePath *C.char, refDirPath *C
 
 		err = rootDocument.WriteFile(outputFilePath)
 		if err != nil {
-			log.Fatalf("Error while writing output to path %s: %v", outputFilePath, err)
+			log.Printf("Error while writing output to path %s: %v", outputFilePath, err)
 			return OutputWriteErr
 		}
 
