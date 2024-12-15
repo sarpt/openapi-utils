@@ -20,6 +20,7 @@
 # Cmd builds
 cmd/*/**
 !cmd/*/*.go
+build
 
 # misc
 *.tmp
